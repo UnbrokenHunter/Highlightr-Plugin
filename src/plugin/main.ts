@@ -39,6 +39,19 @@ export default class HighlightrPlugin extends Plugin {
       name: "Open Highlightr",
       icon: "highlightr-pen",
       editorCallback: (editor: EnhancedEditor) => {
+        // If toggling behavior is enabled and the selection has a highlight,
+        // use this command as a "remove highlight" instead of opening the menu.
+        const selection = editor.getSelection?.() ?? "";
+        if (
+          this.settings.useTogglingBehavior &&
+          selection &&
+          /<mark\b[^>]*>/i.test(selection)
+        ) {
+          this.eraseHighlight(editor);
+          editor.focus();
+          return;
+        }
+
         !document.querySelector(".menu.highlighterContainer")
           ? highlighterMenu(this.app, this.settings, editor)
           : true;
@@ -65,13 +78,37 @@ export default class HighlightrPlugin extends Plugin {
   }
 
   eraseHighlight = (editor: Editor) => {
-    const currentStr = editor.getSelection();
+    const from = editor.getCursor("from");
+    const to = editor.getCursor("to");
+
+    const currentStr = editor.getRange(from, to);
     const newStr = currentStr
       .replace(/\<mark style.*?[^\>]\>/g, "")
       .replace(/\<mark class.*?[^\>]\>/g, "")
       .replace(/\<\/mark>/g, "");
-    editor.replaceSelection(newStr);
-    editor.focus();
+
+      editor.replaceRange(newStr, from, to);
+
+      if (this.settings.useTogglingBehavior && newStr.length > 0) {
+        const lines = newStr.split("\n");
+
+        let newTo;
+        if (lines.length === 1) {
+          newTo = {
+            line: from.line,
+            ch: from.ch + lines[0].length,
+          };
+        } else {
+          newTo = {
+            line: from.line + (lines.length - 1),
+            ch: lines[lines.length - 1].length,
+          };
+        }
+
+        editor.setSelection(from, newTo);
+      }
+
+      editor.focus();
   };
 
   generateCommands(editor: Editor) {
@@ -82,6 +119,47 @@ export default class HighlightrPlugin extends Plugin {
         const curserEnd = editor.getCursor("to");
         const prefix = command.prefix;
         const suffix = command.suffix || prefix;
+          if (this.settings.useTogglingBehavior) {
+            // If the selection already contains any <mark>, we treat this as "remove highlight"
+            if (selectedText && /<mark\b[^>]*>/i.test(selectedText)) {
+              const newStr = selectedText
+                .replace(/\<mark style.*?[^\>]\>/g, "")
+                .replace(/\<mark class.*?[^\>]\>/g, "")
+                .replace(/\<\/mark>/g, "");
+
+              editor.replaceSelection(newStr);
+
+              // Re-select the resulting text (now without the <mark> tags)
+              const newTo = {
+                line: curserStart.line,
+                ch: curserStart.ch + newStr.length,
+              };
+              editor.setSelection(curserStart, newTo);
+              return;
+            } else {
+              // No <mark> in selection: apply highlight with this command's prefix/suffix
+              editor.replaceSelection(`${prefix}${selectedText}${suffix}`);
+
+              if (selectedText && selectedText.length > 0) {
+                // Select the entire <mark ...>selectedText</mark> region
+                const newTo = {
+                  line: curserStart.line,
+                  ch:
+                    curserStart.ch +
+                    prefix.length +
+                    selectedText.length +
+                    suffix.length,
+                };
+                editor.setSelection(curserStart, newTo);
+              } else {
+                // No prior selection: place cursor between prefix and suffix
+                const caretPos = curserStart.ch + prefix.length;
+                editor.setCursor(curserStart.line, caretPos);
+              }
+              return;
+            }
+          }
+
         const setCursor = (mode: number) => {
           editor.setCursor(
             curserStart.line + command.line * mode,
@@ -124,7 +202,29 @@ export default class HighlightrPlugin extends Plugin {
 
         editor.replaceSelection(`${prefix}${selectedText}${suffix}`);
 
-        return setCursor(1);
+        // If no selection beforehand (just caret)
+        if (!selectedText) {
+          return setCursor(1);
+        }
+
+        if (this.settings.useTogglingBehavior) {
+          // Select the entire <mark ...>selectedText</mark> block
+          const newFrom = {
+            line: curserStart.line + command.line,
+            ch: curserStart.ch,
+          };
+          const newTo = {
+            line: curserStart.line + command.line,
+            ch:
+              curserStart.ch +
+              prefix.length +
+              selectedText.length +
+              suffix.length,
+          };
+          editor.setSelection(newFrom, newTo);
+        } else {
+          setCursor(1);
+        }
       };
 
       type CommandPlot = {

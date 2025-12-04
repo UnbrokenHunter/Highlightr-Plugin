@@ -86,6 +86,20 @@ export class HighlightrSettingTab extends PluginSettingTab {
 
     stylesSetting.infoEl.appendChild(styleDemo());
 
+    new Setting(containerEl)
+      .setName("Use toggling behavior")
+      .setDesc(
+        "When enabled, highlight commands will toggle: if the current selection is already highlighted, the same hotkey will remove the highlight instead. This also keeps the entire <mark>...</mark> region selected after applying or removing highlights."
+      )
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.useTogglingBehavior)
+          .onChange(async (value) => {
+            this.plugin.settings.useTogglingBehavior = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
     const highlighterSetting = new Setting(containerEl);
 
     highlighterSetting
